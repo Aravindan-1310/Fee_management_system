@@ -1,0 +1,117 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "workflows_fee_info_name": {
+            "defaultValue": "fee_info",
+            "type": "String"
+        },
+        "connections_sqldw_externalid": {
+            "defaultValue": "/subscriptions/eea33c6e-b0b3-468b-b03e-f3bf3a661104/resourceGroups/fee_details/providers/Microsoft.Web/connections/sqldw",
+            "type": "String"
+        },
+        "connections_outlook_externalid": {
+            "defaultValue": "/subscriptions/eea33c6e-b0b3-468b-b03e-f3bf3a661104/resourceGroups/fee_details/providers/Microsoft.Web/connections/outlook",
+            "type": "String"
+        }
+    },
+    "variables": {},
+    "resources": [
+        {
+            "type": "Microsoft.Logic/workflows",
+            "apiVersion": "2017-07-01",
+            "name": "[parameters('workflows_fee_info_name')]",
+            "location": "northcentralus",
+            "properties": {
+                "state": "Disabled",
+                "definition": {
+                    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {
+                        "$connections": {
+                            "defaultValue": {},
+                            "type": "Object"
+                        }
+                    },
+                    "triggers": {
+                        "Recurrence": {
+                            "recurrence": {
+                                "interval": 1,
+                                "frequency": "Minute"
+                            },
+                            "evaluatedRecurrence": {
+                                "interval": 1,
+                                "frequency": "Minute"
+                            },
+                            "type": "Recurrence"
+                        }
+                    },
+                    "actions": {
+                        "Execute_a_SQL_query_(V2)": {
+                            "runAfter": {},
+                            "type": "ApiConnection",
+                            "inputs": {
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['sqldw']['connectionId']"
+                                    }
+                                },
+                                "method": "post",
+                                "body": {
+                                    "query": "SELECT id , name , total , paid ,email , (total - paid) AS balance FROM students WHERE (total - paid) > 0 ;"
+                                },
+                                "path": "[concat('/v2/datasets/@{encodeURIComponent(encodeURIComponent(''feeuser.database.windows.net''))},@{encodeURIComponent(encodeURIComponent(''', parameters('workflows_fee_info_name'), '''))}/query/sql')]"
+                            }
+                        },
+                        "For_each": {
+                            "foreach": "@body('Execute_a_SQL_query_(V2)')?['resultsets']?['Table1']",
+                            "actions": {
+                                "Send_an_email_(V2)": {
+                                    "type": "ApiConnection",
+                                    "inputs": {
+                                        "host": {
+                                            "connection": {
+                                                "name": "@parameters('$connections')['outlook']['connectionId']"
+                                            }
+                                        },
+                                        "method": "post",
+                                        "body": {
+                                            "To": "@items('For_each')?['email']",
+                                            "Subject": "alert",
+                                            "Body": "<p class=\"editor-paragraph\">Dear @{items('For_each')?['name']}<br><br>This is a reminder that you have an outstanding balance of @{items('For_each')?['balance']}.<br><br>Total Fees: @{items('For_each')?['total']}<br>Amount Paid: @{items('For_each')?['paid']}<br>Pending Amount: @{items('For_each')?['balance']}<br><br>Please clear your dues at the earliest.<br><br>Regards,<br>CIT</p><br>",
+                                            "Importance": "Normal"
+                                        },
+                                        "path": "/v2/Mail"
+                                    }
+                                }
+                            },
+                            "runAfter": {
+                                "Execute_a_SQL_query_(V2)": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Foreach"
+                        }
+                    },
+                    "outputs": {}
+                },
+                "parameters": {
+                    "$connections": {
+                        "value": {
+                            "sqldw": {
+                                "id": "/subscriptions/eea33c6e-b0b3-468b-b03e-f3bf3a661104/providers/Microsoft.Web/locations/northcentralus/managedApis/sqldw",
+                                "connectionId": "[parameters('connections_sqldw_externalid')]",
+                                "connectionName": "sqldw"
+                            },
+                            "outlook": {
+                                "id": "/subscriptions/eea33c6e-b0b3-468b-b03e-f3bf3a661104/providers/Microsoft.Web/locations/northcentralus/managedApis/outlook",
+                                "connectionId": "[parameters('connections_outlook_externalid')]",
+                                "connectionName": "outlook"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    ]
+}
